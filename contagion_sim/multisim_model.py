@@ -12,9 +12,10 @@ class MultisimModel(AbstractSimModel):
     """
 
     def __init__(self, n_nodes, edge_batch_gen, infected_p, infection_p,
-                 recovery_t, recovery_w, n_days, n_sims,
+                 recovery_t, recovery_w, n_days, n_sims, noise=None,
                  share_init=False, initial_infected=None,
-                 analysis_day=None, plt_ax=None, tqdm=None):
+                 analysis_day=None, analysis_true_I=None,
+                 plt_ax=None, tqdm=None):
         """
         :param n_nodes: total number of nodes. Node IDs must go from 0 to n_nodes-1.
         :param edge_batch_gen: generator yielding daily edge pd.DataFrames with
@@ -32,6 +33,8 @@ class MultisimModel(AbstractSimModel):
         nodes. Requires share_init to be True.
         :param analysis_day: day on which the performance of multi-step
         risk warning is stored
+        :param analysis_true_I: if set, this array is used as a true infected
+        vector when analyzing the results.
         :param plt_ax: pyplot axis to plot the results to
         :param tqdm: tqdm module to used for progress tracking
         """
@@ -44,10 +47,12 @@ class MultisimModel(AbstractSimModel):
         self.recovery_w = recovery_w
         self.n_days = n_days
         self.n_sims = n_sims
+        self.noise = noise
         self.today = 0
         self.snapshots = []
         self.analysis_nb = set()
         self.analysis_day = analysis_day
+        self.analysis_true_I = analysis_true_I
         self.analysis = None
 
         # Model keeps track of S and I states as binary matrices, with R
@@ -126,8 +131,13 @@ class MultisimModel(AbstractSimModel):
             self.analysis_nb |= set(edges[edges.a.isin(self.initial_infected_idx)].b)
             if self.analysis_day == self.today:
                 I = ~self.S
-                true_I = I[:, 0]
-                sim_I = I[:, 1:]
+                if self.analysis_true_I is not None:
+                    true_I = self.analysis_true_I
+                    sim_I = I
+                else:
+                    true_I = I[:, 0]
+                    sim_I = I[:, 1:]
+                    self.analysis_true_I = true_I
                 sim_score = sim_I.sum(axis=1)
                 analysis_stats = pd.DataFrame({'I': true_I, 'score': sim_score},
                                               index=range(self.n_nodes))
@@ -168,12 +178,13 @@ class MultisimModel(AbstractSimModel):
                     # Grouping together all the input interactions for each
                     # 'receiving' node, we set it as infected if it is
                     # in fact infected by any of the 'source' nodes
-                    new_I[a] = spread_I[a_edges.index].any(axis=0)
+                    # and is currently susceptible
+                    new_I[a] = spread_I[a_edges.index].any(axis=0) & self.S[a]
                 for node, node_I in new_I.items():
                     # For each updated node (in each simulation), we set it's
                     # state to I only if it is either already infected, or if
-                    # it has been infected today and has previously been susceptible
-                    self.I[node] = self.I[node] | (node_I & self.S[node])
+                    # it has been infected today
+                    self.I[node] = self.I[node] | node_I
                     # Each node (in each simulation) is still susceptible only if
                     # it has already been susceptible, and hasn't been infected now.
                     self.S[node] = ~node_I & self.S[node]
@@ -184,6 +195,18 @@ class MultisimModel(AbstractSimModel):
                 # All the infected nodes whose recovery time has passed, are
                 # no longer infected.
                 self.I[self.R_t <= self.today] = False
+
+                # Introduce noise - randomly emerging infection in some percent of population
+                if self.noise is not None:
+                    emerged_I = self.random_binary_array(self.I.shape, self.noise) & self.S
+                    self.I = self.I | emerged_I
+                    # Each node (in each simulation) is still susceptible only if
+                    # it has already been susceptible, and hasn't been infected now.
+                    self.S = ~self.I & self.S
+                    # Recovery times for newly infected nodes are drawn from a normal distribution
+                    self.R_t[emerged_I] = \
+                        np.random.normal(self.recovery_t, self.recovery_w, emerged_I.sum())
+
 
                 # Take a statistical snapshot
                 self.statistical_snapshot()
