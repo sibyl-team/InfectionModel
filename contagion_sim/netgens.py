@@ -66,9 +66,19 @@ def visualize_freq_dist(freq_dist, plt_ax=None, **freq_dist_kwargs):
     pd.Series(FREQ_DISTS[freq_dist](1000, **freq_dist_kwargs)).hist(bins=100, ax=plt_ax)
 
 
-def edge_gen_ferretti(file='all_interaction_10000_basic.csv'):
-    edges = pd.read_csv(file).rename(columns={'ID': 'a', 'ID_2': 'b', 'time': 'day'})
-    edges.sort_values('day', inplace=True)
+
+cached_ferretti_data = {}
+
+def edge_gen_ferretti(file='all_interaction_10000.csv'):
+    global cached_ferretti_data
+    if file not in cached_ferretti_data:
+        renames = {'ID': 'a', 'ID_2': 'b', 'time': 'day'}
+        edges = pd.read_csv(file)[list(renames.keys())].rename(columns=renames)
+        edges.day -= edges.day.min()
+        edges.sort_values('day', inplace=True)
+        cached_ferretti_data[file] = edges
+
+    edges = cached_ferretti_data[file]
     for day in range(edges.day.max() + 1):
         day_edges = edges[edges.day == day]
         # removing b < a edges because model duplicates them later

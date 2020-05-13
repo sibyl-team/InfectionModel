@@ -159,7 +159,7 @@ class MultisimModel(AbstractSimModel):
             self.pbar.set_description('Starting simulation...')
             for day, edges in self.edge_batch_gen:
                 self.today = day
-                if day > self.n_days:
+                if day >= self.n_days:
                     return
 
                 if self.generate_daily_I:
