@@ -5,60 +5,57 @@ from sklearn.metrics import roc_curve, confusion_matrix
 from sim_model import AbstractSimModel
 
 
-class MultisimModel(AbstractSimModel):
+class ContinuousMultisimModel(AbstractSimModel):
     """
-    Execute multiple contagion spread simulations in parallel and analyze the
-    results, including the performance of the multi-step risk warnings.
+    Execute continuous multiple contagion spread simulations in parallel
+    and analyze the results, including the performance
+    of the multi-step risk warnings.
     """
 
-    def __init__(self, n_nodes, edge_batch_gen,
-                 infected_p, infection_p,
-                 recovery_t, recovery_w, n_days, n_sims, noise=None,
-                 share_init=False, initial_infected=None,
-                 analysis_day=None, analysis_true_I=None,
-                 generate_daily_I=False,
+    def __init__(self, n_nodes, edge_batch_gen, daily_infected,
+                 infection_p, recovery_t, recovery_w, n_days, n_sims,
+                 daily_tests_positive, daily_tests_random,
+                 performance_true_I, strong_negative=False,
                  plt_ax=None, tqdm=None):
         """
         :param n_nodes: total number of nodes. Node IDs must go from 0 to n_nodes-1.
         :param edge_batch_gen: generator yielding daily edge pd.DataFrames with
         columns 'a' and 'b' for pairs of nodes
-        :param infected_p: probability of each node being infected on day 0
+        :param daily_infected: list of infected node vectors per day (ground truth)
         :param infection_p: probability of infected node infecting susceptible
         node during interaction
         :param recovery_t: mean recovery time
         :param recovery_w: recovery time distribution width (std)
         :param n_days: number of days to run the simulation for
+        :param daily_tests_positive: number of positive tests daily
+        :param daily_tests_random: number of random tests daily
         :param n_sims: total number of simulations to run in parallel
-        :param share_init: if True, initially infected nodes are the same across
-        all simulations. Otherwise, each simulation is randomly seeded.
-        :param initial_infected: Optional. Binary vector of initially infected
-        nodes. Requires share_init to be True.
-        :param analysis_day: day on which the performance of multi-step
-        risk warning is stored
-        :param analysis_true_I: if set, this array is used as a true infected
-        vector when analyzing the results.
-        :param generate_daily_I: collect daily I from a single simulation.
+        :param performance_true_I: ground truth infected on the day of analysis
+        :param strong_negative: nodes which tested negative at some point
+        could not be positive before the test, i.e. nonI = nonR.
         :param plt_ax: pyplot axis to plot the results to
         :param tqdm: tqdm module to used for progress tracking
         """
         super().__init__(plt_ax, tqdm)
         self.n_nodes = n_nodes
         self.edge_batch_gen = edge_batch_gen
+        self.daily_infected = daily_infected
         self.infection_p = infection_p
-        self.infected_p = infected_p
         self.recovery_t = recovery_t
         self.recovery_w = recovery_w
         self.n_days = n_days
         self.n_sims = n_sims
-        self.noise = noise
+        self.daily_tests_positive = daily_tests_positive
+        self.daily_tests_random = daily_tests_random
+        self.daily_positives = []
+        self.daily_negatives = []
+        self.strong_negative = strong_negative
+        self.tested_positive = np.full(n_nodes, False)
         self.today = 0
         self.snapshots = []
-        self.analysis_nb = set()
-        self.analysis_day = analysis_day
-        self.analysis_true_I = analysis_true_I
-        self.analysis = None
-        self.generate_daily_I = generate_daily_I
-        self.daily_I = []
+        self.performance_true_I = performance_true_I
+
+        self.prepare_testing()
 
         # Model keeps track of S and I states as binary matrices, with R
         # being implicitly defined as ~S & ~I. Additionally, time of recovery
@@ -67,43 +64,11 @@ class MultisimModel(AbstractSimModel):
         # element corresponding to a state of a single node in a single simulation.
         state_dim = (n_nodes, n_sims)
 
-        if share_init:
-            # If all simulations share the initially infected nodes...
-            if initial_infected is not None:
-                # ...and if these nodes are provided, we use them...
-                single_sim_initial_infected = initial_infected
-            else:
-                # ...otherwise we create a new vector
-                single_sim_initial_infected = self.random_binary_array(n_nodes, self.infected_p)
+        self.S = np.full(state_dim, True)
+        self.I = np.full(state_dim, False)
+        self.R_t = np.full(state_dim, np.inf)
+        self.tested_positive = np.full(n_nodes, False)
 
-            n_infected = single_sim_initial_infected.sum()
-            self.initial_infected = single_sim_initial_infected
-            # initial infection is duplicated across all simulations
-            self.I = np.array([single_sim_initial_infected, ] * n_sims).T
-
-            # Default recovery time is inf as susceptible nodes are never recovered
-            single_sim_R_t = np.full(n_nodes, np.inf)
-            # Each infected node needs a recovery time drawn from a normal distribution
-            single_sim_R_t[single_sim_initial_infected] = \
-                np.random.normal(self.recovery_t, self.recovery_w, n_infected)
-            # These recovery times are again duplicated across all simulations
-            self.R_t = np.array([single_sim_R_t, ] * n_sims).T
-        else:
-            # If each simulation is independent,
-            # whole infection matrix is randomly generated.
-            self.initial_infected = self.random_binary_array(state_dim, self.infected_p)
-            self.I = self.initial_infected.copy()
-            n_infected = self.I.sum()
-
-            # Recovery times are randomly drawn from a normal distribution
-            self.R_t = np.full(state_dim, np.inf)
-            self.R_t[self.I] = np.random.normal(self.recovery_t, self.recovery_w, n_infected)
-
-        # All non-infected nodes are susceptible on day 0, as none are yet recovered
-        self.S = ~self.I
-
-        # Indices of initially infected nodes used later
-        self.initial_infected_idx = np.argwhere(self.initial_infected).ravel()
 
     def random_binary_array(self, shape, p):
         """
@@ -131,45 +96,102 @@ class MultisimModel(AbstractSimModel):
             f'Day:{self.today + 1}\tS:{int(S_p * 100)}%\tI:{int(I_p * 100)}%\tR:{int(R_p * 100)}%')
         self.snapshots.append(snap)
 
-    def analysis_snapshot(self, edges):
-        if self.analysis_day is not None and self.analysis_day <= self.today:
-            self.analysis_nb |= set(edges[edges.a.isin(self.initial_infected_idx)].b)
-            if self.analysis_day == self.today:
-                I = ~self.S
-                if self.analysis_true_I is not None:
-                    true_I = self.analysis_true_I
-                    sim_I = I
+    def prepare_testing(self):
+        for day, true_I in enumerate(self.daily_infected):
+            if true_I is None:
+                if self.daily_positives:
+                    self.daily_positives.append(self.daily_positives[-1])
+                    self.daily_negatives.append(self.daily_negatives[-1])
                 else:
-                    true_I = I[:, 0]
-                    sim_I = I[:, 1:]
-                    self.analysis_true_I = true_I
-                sim_score = sim_I.sum(axis=1)
-                analysis_stats = pd.DataFrame({'I': true_I, 'score': sim_score},
-                                              index=range(self.n_nodes))
-                analysis_stats['nb'] = analysis_stats.index.isin(self.analysis_nb)
-                analysis_stats['init_I'] = self.initial_infected
+                    self.daily_positives.append(np.full(self.n_nodes, False))
+                    self.daily_negatives.append(np.full(self.n_nodes, False))
+                continue
 
-                self.analysis = analysis_stats
+            # testing counts
+            positive_candidates = true_I & ~self.tested_positive
+            test_positive_n = min(self.daily_tests_positive, positive_candidates.sum())
+            test_random_n = self.daily_tests_random + self.daily_tests_positive - test_positive_n
+
+            # idx of positive tests
+            positive_tests_idx = np.random.choice(np.nonzero(positive_candidates)[0],
+                                                  size=test_positive_n, replace=False)
+            # update global positive tests
+            self.tested_positive[positive_tests_idx] = True
+
+            # candidates for random testing are nodes which haven't tested positive yet
+            random_candidates = ~self.tested_positive
+            # index of random tests
+            random_tests_idx = np.random.choice(np.nonzero(random_candidates)[0],
+                                                size=test_random_n, replace=False)
+            # positive random tests
+            random_tests_I = np.full(self.n_nodes, False)
+            random_tests_I[random_tests_idx] = true_I[random_tests_idx]
+
+            # update global positive tests
+            self.tested_positive |= random_tests_I
+
+            # negative random tests
+            random_tests_nonI = np.full(self.n_nodes, False)
+            random_tests_nonI[random_tests_idx] = ~true_I[random_tests_idx]
+
+            # new positive nodes from both tests
+            new_positive = random_tests_I.copy()
+            new_positive[positive_tests_idx] = True
+
+            self.daily_positives.append(new_positive)
+            self.daily_negatives.append(random_tests_nonI)
+
+        if self.strong_negative:
+            negatives = np.full(self.n_nodes, False)
+            for i, daily_neg in reversed(list(enumerate(self.daily_negatives))):
+                negatives |= daily_neg
+                self.daily_negatives[i] = negatives.copy()
+
+    def apply_testing(self):
+        #
+        # Positives
+
+        new_positive = self.daily_positives[self.today]
+
+        # new positives per simulation
+        new_I = np.full((self.n_nodes, self.n_sims), False)
+        new_I[new_positive] = True
+        new_I = new_I & ~self.I
+        self.I[new_I] = True
+
+        # update R_t per simulation per node
+        # self.R_t[new_I] = np.random.normal(self.recovery_t, self.recovery_w, new_I.sum())
+        self.R_t[new_I] = np.random.geometric(1 / self.recovery_t, new_I.sum()) + self.today
+
+        #
+        # Negatives
+
+        new_negative = self.daily_negatives[self.today]
+
+        # remove infection from negative nodes
+        new_S = np.full((self.n_nodes, self.n_sims), False)
+        new_S[new_negative] = True
+        self.I = self.I & ~new_S
+        self.R_t[new_S] = np.inf
+
 
     def run_sim(self):
-        # For better understanding of the following process, going through the
-        # simple SimModel first is strongly advised.
         with self.tqdm(total=self.n_days) as pbar:
             self.pbar = pbar
             self.pbar.set_description('Starting simulation...')
             for day, edges in self.edge_batch_gen:
                 self.today = day
-                if day > self.n_days:
+                if day >= self.n_days:
                     return
 
-                if self.generate_daily_I:
-                    self.daily_I.append(self.I[:, 0].copy())
+                self.apply_testing()
 
                 # Interactions are symmetrical, so we duplicate them for the
                 # 'other' direction. We think of all interactions as a <- b,
                 # meaning b is infecting a.
                 edges_inverse = edges.rename(columns={'a': 'b', 'b': 'a'})
                 edges = pd.concat([edges, edges_inverse], sort=True).reset_index()
+
 
                 # Infection vectors of the source ('b') nodes
                 spread_I = self.I[edges.b]
@@ -200,7 +222,7 @@ class MultisimModel(AbstractSimModel):
                     self.S[node] = ~node_I & self.S[node]
                     # Recovery times for newly infected nodes are drawn from a normal distribution
                     self.R_t[node, node_I] = \
-                        np.random.geometric(1 / self.recovery_t, node_I.sum()) + self.today
+                        np.random.geometric(1/self.recovery_t, node_I.sum()) + self.today
                     # self.R_t[node, node_I] = \
                     #     np.random.normal(self.recovery_t, self.recovery_w, node_I.sum())
 
@@ -208,25 +230,8 @@ class MultisimModel(AbstractSimModel):
                 # no longer infected.
                 self.I[self.R_t <= self.today] = False
 
-                # Introduce noise - randomly emerging infection in some percent of population
-                if self.noise is not None:
-                    emerged_I = self.random_binary_array(self.I.shape, self.noise) & self.S
-                    self.I = self.I | emerged_I
-                    # Each node (in each simulation) is still susceptible only if
-                    # it has already been susceptible, and hasn't been infected now.
-                    self.S = ~self.I & self.S
-                    # Recovery times for newly infected nodes are drawn from a normal distribution
-                    self.R_t[emerged_I] = \
-                        np.random.geometric(1 / self.recovery_t, emerged_I.sum()) + self.today
-                    # self.R_t[emerged_I] = \
-                    #     np.random.normal(self.recovery_t, self.recovery_w, emerged_I.sum()) + self.today
-
-
                 # Take a statistical snapshot
                 self.statistical_snapshot()
-
-                # Take a performance analysis snapshot
-                self.analysis_snapshot(edges)
 
                 # Update progress bar
                 pbar.update(1)

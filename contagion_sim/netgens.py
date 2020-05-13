@@ -64,3 +64,12 @@ def visualize_freq_dist(freq_dist, plt_ax=None, **freq_dist_kwargs):
     :param freq_dist_kwargs: additional freq. dist. parameters
     """
     pd.Series(FREQ_DISTS[freq_dist](1000, **freq_dist_kwargs)).hist(bins=100, ax=plt_ax)
+
+
+def edge_gen_ferretti(file='all_interaction_10000_basic.csv'):
+    edges = pd.read_csv(file).rename(columns={'ID': 'a', 'ID_2': 'b', 'time': 'day'})
+    edges.sort_values('day', inplace=True)
+    for day in range(edges.day.max() + 1):
+        day_edges = edges[edges.day == day]
+        # removing b < a edges because model duplicates them later
+        yield day, day_edges[day_edges.a < day_edges.b][['a', 'b']]
