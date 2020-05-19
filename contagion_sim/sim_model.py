@@ -141,5 +141,6 @@ class SimModel(AbstractSimModel):
 
                 if not self.nodes.I.any():
                     # if no nodes are infected anymore, stop the simulation
-                    print(f'No more infected nodes, simulation stopped on day {day}.')
+                    # changed printf command per debugger output - WMT
+                    printf('No more infected nodes, simulation stopped on day {day}.')
                     break
