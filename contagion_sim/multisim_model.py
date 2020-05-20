@@ -5,6 +5,7 @@ from sklearn.metrics import roc_curve, confusion_matrix
 from sim_model import AbstractSimModel
 
 
+
 class MultisimModel(AbstractSimModel):
     """
     Execute multiple contagion spread simulations in parallel and analyze the
@@ -150,6 +151,28 @@ class MultisimModel(AbstractSimModel):
                 analysis_stats['init_I'] = self.initial_infected
 
                 self.analysis = analysis_stats
+                
+    def make_new_state(self, spread_I, edges):
+        new_I = {}
+        for a, a_edges in edges.groupby('a'):
+            # Grouping together all the input interactions for each
+            # 'receiving' node, we set it as infected if it is
+            # in fact infected by any of the 'source' nodes
+            # and is currently susceptible
+            new_I[a] = spread_I[a_edges.index].any(axis=0) & self.S[a]
+        for node, node_I in new_I.items():
+            # For each updated node (in each simulation), we set it's
+            # state to I only if it is either already infected, or if
+            # it has been infected today
+            self.I[node] = self.I[node] | node_I
+            # Each node (in each simulation) is still susceptible only if
+            # it has already been susceptible, and hasn't been infected now.
+            self.S[node] = ~node_I & self.S[node]
+            # Recovery times for newly infected nodes are drawn from a normal distribution
+            self.R_t[node, node_I] = \
+                np.random.geometric(1 / self.recovery_t, node_I.sum()) + self.today
+            # self.R_t[node, node_I] = \
+            #     np.random.normal(self.recovery_t, self.recovery_w, node_I.sum())
 
     def run_sim(self):
         # For better understanding of the following process, going through the
@@ -183,6 +206,8 @@ class MultisimModel(AbstractSimModel):
                 # We are not allowed to change the matrix I directly while
                 # applying interactions, as multiple-step spreading is not
                 # possible in a single day
+                self.make_new_state(spread_I, edges)
+                """
                 new_I = {}
                 for a, a_edges in edges.groupby('a'):
                     # Grouping together all the input interactions for each
@@ -203,7 +228,7 @@ class MultisimModel(AbstractSimModel):
                         np.random.geometric(1 / self.recovery_t, node_I.sum()) + self.today
                     # self.R_t[node, node_I] = \
                     #     np.random.normal(self.recovery_t, self.recovery_w, node_I.sum())
-
+                """
                 # All the infected nodes whose recovery time has passed, are
                 # no longer infected.
                 self.I[self.R_t <= self.today] = False
