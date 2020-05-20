@@ -184,7 +184,7 @@ class MultisimModel(AbstractSimModel):
                 self.today = day
                 if day >= self.n_days:
                     return
-
+                print(f"Day: {self.today}",end="\r")
                 if self.generate_daily_I:
                     self.daily_I.append(self.I[:, 0].copy())
 
