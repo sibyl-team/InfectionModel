@@ -16,7 +16,7 @@ class ContinuousMultisimModel(AbstractSimModel):
                  infection_p, recovery_t, recovery_w, n_days, n_sims,
                  daily_tests_positive, daily_tests_random,
                  performance_true_I, strong_negative=False,
-                 plt_ax=None, tqdm=None):
+                 plt_ax=None, tqdm=None,debug=False):
         """
         :param n_nodes: total number of nodes. Node IDs must go from 0 to n_nodes-1.
         :param edge_batch_gen: generator yielding daily edge pd.DataFrames with
@@ -54,8 +54,11 @@ class ContinuousMultisimModel(AbstractSimModel):
         self.today = 0
         self.snapshots = []
         self.performance_true_I = performance_true_I
+        self.daily_randomly_tested = []
 
-        self.prepare_testing()
+        
+        self.debug = debug
+        self.prepare_testing(debug)
 
         # Model keeps track of S and I states as binary matrices, with R
         # being implicitly defined as ~S & ~I. Additionally, time of recovery
@@ -67,7 +70,8 @@ class ContinuousMultisimModel(AbstractSimModel):
         self.S = np.full(state_dim, True)
         self.I = np.full(state_dim, False)
         self.R_t = np.full(state_dim, np.inf)
-        self.tested_positive = np.full(n_nodes, False)
+        #self.tested_positive = np.full(n_nodes, False)
+        
 
 
     def random_binary_array(self, shape, p):
@@ -96,25 +100,34 @@ class ContinuousMultisimModel(AbstractSimModel):
             f'Day:{self.today + 1}\tS:{int(S_p * 100)}%\tI:{int(I_p * 100)}%\tR:{int(R_p * 100)}%')
         self.snapshots.append(snap)
 
-    def prepare_testing(self):
+    def prepare_testing(self,debug):
         for day, true_I in enumerate(self.daily_infected):
             if true_I is None:
+                # when you don't have the real infection status
                 if self.daily_positives:
+                    # tests the same nodes you tested the day before
                     self.daily_positives.append(self.daily_positives[-1])
                     self.daily_negatives.append(self.daily_negatives[-1])
+                    self.daily_randomly_tested.append(
+                        self.daily_randomly_tested[-1])
                 else:
                     self.daily_positives.append(np.full(self.n_nodes, False))
                     self.daily_negatives.append(np.full(self.n_nodes, False))
                 continue
-
+            if debug:
+                print("\tDay",day)
             # testing counts
             positive_candidates = true_I & ~self.tested_positive
             test_positive_n = min(self.daily_tests_positive, positive_candidates.sum())
             test_random_n = self.daily_tests_random + self.daily_tests_positive - test_positive_n
-
+           
             # idx of positive tests
             positive_tests_idx = np.random.choice(np.nonzero(positive_candidates)[0],
                                                   size=test_positive_n, replace=False)
+            if debug:
+                print("Positive")
+                print(positive_candidates.sum(),test_positive_n,test_random_n)
+                print(np.nonzero(positive_candidates)[0],positive_tests_idx)
             # update global positive tests
             self.tested_positive[positive_tests_idx] = True
 
@@ -126,7 +139,10 @@ class ContinuousMultisimModel(AbstractSimModel):
             # positive random tests
             random_tests_I = np.full(self.n_nodes, False)
             random_tests_I[random_tests_idx] = true_I[random_tests_idx]
-
+            if debug:
+                print("Random")
+                print(random_tests_idx,true_I[random_tests_idx])
+            
             # update global positive tests
             self.tested_positive |= random_tests_I
 
@@ -137,33 +153,43 @@ class ContinuousMultisimModel(AbstractSimModel):
             # new positive nodes from both tests
             new_positive = random_tests_I.copy()
             new_positive[positive_tests_idx] = True
-
+            
+            # daily_{positives,negatives} becomes a list of arrays indicating
+            # which nodes test {positive,negative}
             self.daily_positives.append(new_positive)
             self.daily_negatives.append(random_tests_nonI)
+            self.daily_randomly_tested.append(random_tests_idx)
 
         if self.strong_negative:
+            self.old_daily_negatives = list(self.daily_negatives)
             negatives = np.full(self.n_nodes, False)
             for i, daily_neg in reversed(list(enumerate(self.daily_negatives))):
                 negatives |= daily_neg
                 self.daily_negatives[i] = negatives.copy()
 
     def apply_testing(self):
+        """
+        Apply testing for the day
+        """
         #
         # Positives
 
         new_positive = self.daily_positives[self.today]
 
-        # new positives per simulation
+        # set new positives per simulation
         new_I = np.full((self.n_nodes, self.n_sims), False)
         new_I[new_positive] = True
+        
+        # "filter" by considering only those that are NOT INFECTED in the sim
         new_I = new_I & ~self.I
+        # Add those to the state
         self.I[new_I] = True
 
         # update R_t per simulation per node
         # self.R_t[new_I] = np.random.normal(self.recovery_t, self.recovery_w, new_I.sum())
         self.R_t[new_I] = np.random.geometric(1 / self.recovery_t, new_I.sum()) + self.today
 
-        #
+        # DO THE SAME FOR NEGATIVE TESTS
         # Negatives
 
         new_negative = self.daily_negatives[self.today]
@@ -174,8 +200,41 @@ class ContinuousMultisimModel(AbstractSimModel):
         self.I = self.I & ~new_S
         self.R_t[new_S] = np.inf
 
+    def update_state(self, spread_I, edges):
+        """
+        Separate method to update the state
+        """
+        new_I = {}
+        for a, a_edges in edges.groupby('a'):
+            # Grouping together all the input interactions for each
+            # 'receiving' node, we set it as infected if it is
+            # in fact infected by any of the 'source' nodes
+            # and is currently susceptible
+            new_I[a] = spread_I[a_edges.index].any(axis=0) & self.S[a]
+        for node, node_I in new_I.items():
+            # For each updated node (in each simulation), we set it's
+            # state to I only if it is either already infected, or if
+            # it has been infected today
+            self.I[node] = self.I[node] | node_I
+            # Each node (in each simulation) is still susceptible only if
+            # it has already been susceptible, and hasn't been infected now.
+            self.S[node] = ~node_I & self.S[node]
+            # Recovery times for newly infected nodes are drawn from a normal distribution
+            self.R_t[node, node_I] = \
+                np.random.geometric(1 / self.recovery_t, node_I.sum()) + self.today +1
 
+    def prepare_contacts(self,edges):
+        """
+        Get the edges in the correct format
+        """
+       
+        edges_inverse = edges.rename(columns={'a': 'b', 'b': 'a'})
+        return pd.concat([edges, edges_inverse],sort=True).reset_index()
+    
     def run_sim(self):
+        """
+        Run epidemies simulation
+        """
         with self.tqdm(total=self.n_days) as pbar:
             self.pbar = pbar
             self.pbar.set_description('Starting simulation...')
@@ -183,15 +242,16 @@ class ContinuousMultisimModel(AbstractSimModel):
                 self.today = day
                 if day >= self.n_days:
                     return
-
+                print(f"Day {self.today}",end="\r")
                 self.apply_testing()
 
-                # Interactions are symmetrical, so we duplicate them for the
+                """ # Interactions are symmetrical, so we duplicate them for the
                 # 'other' direction. We think of all interactions as a <- b,
                 # meaning b is infecting a.
                 edges_inverse = edges.rename(columns={'a': 'b', 'b': 'a'})
-                edges = pd.concat([edges, edges_inverse], sort=True).reset_index()
-
+                edges = pd.concat([edges, edges_inverse], sort=True).reset_index()"""
+                
+                edges=self.prepare_contacts(edges)
 
                 # Infection vectors of the source ('b') nodes
                 spread_I = self.I[edges.b]
@@ -205,26 +265,7 @@ class ContinuousMultisimModel(AbstractSimModel):
                 # We are not allowed to change the matrix I directly while
                 # applying interactions, as multiple-step spreading is not
                 # possible in a single day
-                new_I = {}
-                for a, a_edges in edges.groupby('a'):
-                    # Grouping together all the input interactions for each
-                    # 'receiving' node, we set it as infected if it is
-                    # in fact infected by any of the 'source' nodes
-                    # and is currently susceptible
-                    new_I[a] = spread_I[a_edges.index].any(axis=0) & self.S[a]
-                for node, node_I in new_I.items():
-                    # For each updated node (in each simulation), we set it's
-                    # state to I only if it is either already infected, or if
-                    # it has been infected today
-                    self.I[node] = self.I[node] | node_I
-                    # Each node (in each simulation) is still susceptible only if
-                    # it has already been susceptible, and hasn't been infected now.
-                    self.S[node] = ~node_I & self.S[node]
-                    # Recovery times for newly infected nodes are drawn from a normal distribution
-                    self.R_t[node, node_I] = \
-                        np.random.geometric(1/self.recovery_t, node_I.sum()) + self.today
-                    # self.R_t[node, node_I] = \
-                    #     np.random.normal(self.recovery_t, self.recovery_w, node_I.sum())
+                self.update_state(spread_I, edges)
 
                 # All the infected nodes whose recovery time has passed, are
                 # no longer infected.
