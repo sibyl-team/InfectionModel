@@ -244,6 +244,7 @@ class MultisimRankModel(FasterContinousModel):
         self.positive_tested_set.update(index_positive)
 
         if day == self.n_days -1:
+            print("Propagation")
             self._propagate_susceptibles()
 
     def set_daily_observations_index(self,day,not_I_index,I_index):
