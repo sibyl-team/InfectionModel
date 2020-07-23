@@ -1,7 +1,5 @@
 import numpy as np
 import pandas as pd
-from sklearn.metrics import roc_curve, confusion_matrix
-
 from sim_model import AbstractSimModel
 
 
@@ -12,7 +10,7 @@ class MultisimModelEvaluation(AbstractSimModel):
     """
 
     def __init__(self, n_nodes, n_days, n_sims, edge_batch_gen, observations,
-                 infection_p, infected_p, recovery_t, recovery_w, recovery_dist='normal',
+                 infection_p, infected_p, recovery_t, recovery_w, recovery_dist='geometric',
                  directed_edges=False,
                  plt_ax=None, tqdm=None):
         """
@@ -97,6 +95,28 @@ class MultisimModelEvaluation(AbstractSimModel):
         self.I = self.I & ~new_S
         self.R_t[new_S] = np.inf
 
+    def _update_state(self, edges, spread_I):
+
+        # We are not allowed to change the matrix I directly while
+        # applying interactions, as multiple-step spreading is not
+        # possible in a single day
+        new_I = {}
+        for a, a_edges in edges.groupby('a'):
+            # Grouping together all the input interactions for each
+            # 'receiving' node, we set it as infected if it is
+            # in fact infected by any of the 'source' nodes
+            # and is currently susceptible
+            new_I[a] = spread_I[a_edges.index].any(axis=0) & self.S[a]
+        for node, node_I in new_I.items():
+            # For each updated node (in each simulation), we set it's
+            # state to I only if it is either already infected, or if
+            # it has been infected today
+            self.I[node] = self.I[node] | node_I
+            # Each node (in each simulation) is still susceptible only if
+            # it has already been susceptible, and hasn't been infected now.
+            self.S[node] = ~node_I & self.S[node]
+            # Recovery times for newly infected nodes are drawn from a normal distribution
+            self.R_t[node, node_I] = self.recovery_time(node_I.sum())
 
     def run_sim(self):
         # For better understanding of the following process, going through the
@@ -128,27 +148,7 @@ class MultisimModelEvaluation(AbstractSimModel):
                 passthrough = self.random_binary_array(spread_I.shape, self.infection_p)
                 spread_I = spread_I & passthrough
 
-                # We are not allowed to change the matrix I directly while
-                # applying interactions, as multiple-step spreading is not
-                # possible in a single day
-                new_I = {}
-                for a, a_edges in edges.groupby('a'):
-                    # Grouping together all the input interactions for each
-                    # 'receiving' node, we set it as infected if it is
-                    # in fact infected by any of the 'source' nodes
-                    # and is currently susceptible
-                    new_I[a] = spread_I[a_edges.index].any(axis=0) & self.S[a]
-                for node, node_I in new_I.items():
-                    # For each updated node (in each simulation), we set it's
-                    # state to I only if it is either already infected, or if
-                    # it has been infected today
-                    self.I[node] = self.I[node] | node_I
-                    # Each node (in each simulation) is still susceptible only if
-                    # it has already been susceptible, and hasn't been infected now.
-                    self.S[node] = ~node_I & self.S[node]
-                    # Recovery times for newly infected nodes are drawn from a normal distribution
-                    self.R_t[node, node_I] = self.recovery_time(node_I.sum())
-
+                self._update_state(edges, spread_I)
                 # All the infected nodes whose recovery time has passed, are
                 # no longer infected.
                 self.I[self.R_t <= self.today] = False
