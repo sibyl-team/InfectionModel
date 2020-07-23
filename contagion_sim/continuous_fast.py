@@ -78,7 +78,7 @@ class FasterContinousModel(ContinuousMultisimModel):
         
         self.contacts_directed = contacts_directed
     
-    def make_new_state(self, spread_I, edges):
+    def update_state(self, spread_I, edges):
 
         
 
@@ -96,8 +96,10 @@ class FasterContinousModel(ContinuousMultisimModel):
         return np.random.random(shape) < p
     
     def decide_rec_times(self,num):
-        return np.random.geometric(1 / self.recovery_t, num) + self.today +1
+        return np.random.geometric(1 / self.recovery_t, num) + self.today
+        #return np.random.geometric(1 / self.recovery_t, num) + self.today +1
 
+    '''
     def apply_testing(self):
         """
         Apply testing for the day
@@ -107,13 +109,7 @@ class FasterContinousModel(ContinuousMultisimModel):
         
         new_positive = self.daily_positives[self.today]
         new_negative = self.daily_negatives[self.today]
-        """
-        apply_testing_numba(new_positive,new_negative,self.I,self.R_t,\
-                            1. / self.recovery_t, self.today)
-        #self.I = apply_tests2(new_positive,new_negative,self.I,self.R_t,\
-        #                    1. / self.recovery_t, self.today)
-        
-        """
+
         new_I = new_positive[:,np.newaxis] & np.logical_not(self.I)
         # Add those to the state
         self.I[new_I] = True
@@ -128,6 +124,7 @@ class FasterContinousModel(ContinuousMultisimModel):
         new_S = new_negative[:,np.newaxis]
         self.I = self.I & ~new_S
         self.R_t[new_negative] = np.inf
+    '''
 
 
     def prepare_contacts(self,edges):

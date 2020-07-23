@@ -242,7 +242,7 @@ class ContinuousMultisimModel(AbstractSimModel):
                 self.today = day
                 if day >= self.n_days:
                     return
-                print(f"Day {self.today}",end="\r")
+                #print(f"Day {self.today}",end="\r")
                 self.apply_testing()
 
                 """ # Interactions are symmetrical, so we duplicate them for the

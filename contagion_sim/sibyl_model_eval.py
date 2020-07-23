@@ -36,3 +36,7 @@ class FasterEvaluationModel(MultisimModelEvaluation):
         self.S = self.S & np.logical_not(new_inf)
 
         self.R_t[np.where(new_inf)] = self.recovery_time(new_inf.sum())
+        
+    def random_binary_array(self, shape, p):
+
+        return np.random.random(shape) < p
