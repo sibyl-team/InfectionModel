@@ -1,6 +1,9 @@
 """
 Improved and adapted versions of ContinuousMultisimModel
 
+This Source Code Form is subject to the terms of the Mozilla Public
+License, v. 2.0. If a copy of the MPL was not distributed with this
+file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
 author: Fabio Mazza
 """
@@ -26,7 +29,7 @@ def update_inf(new_inf,dest,S_mat,spread_I):
         recv = dest[i]
         new_inf[recv] = new_inf[recv] | (S_mat[recv] & spread_I[i])
 #@nb.njit()
-
+"""
 @nb.njit(nb.void(nb.bool_[:],nb.bool_[:],nb.bool_[:,:], nb.float64[:,:], nb.float64,nb.int_))
 def apply_testing_numba(new_positive,new_negative,I_mat,R_times,mu,today):
     
@@ -49,7 +52,7 @@ def apply_testing_numba(new_positive,new_negative,I_mat,R_times,mu,today):
     #I_mat = I_mat & ~new_S
     I_mat[new_negative,:] = False
     R_times[new_negative,:] = np.inf
-
+"""
     
 
 class FasterContinousModel(ContinuousMultisimModel):
@@ -86,8 +89,7 @@ class FasterContinousModel(ContinuousMultisimModel):
         self.I = self.I | new_inf
         self.S = self.S & np.logical_not(new_inf)
 
-        self.R_t[np.where(new_inf)] = \
-            np.random.geometric(1 / self.recovery_t, new_inf.sum()) + self.today + 1
+        self.R_t[np.where(new_inf)] = self.decide_rec_times(new_inf.sum())
     
     def random_binary_array(self, shape, p):
 
