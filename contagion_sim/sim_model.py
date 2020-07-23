@@ -19,6 +19,19 @@ class AbstractSimModel:
 
         self.pbar = None
 
+    def random_binary_array(self, shape, p):
+        """
+        Create a random binary array.
+        :param shape: shape of the output array
+        :param p: probability of each element being True
+        :return: boolean numpy array
+        """
+        return np.random.choice(
+            [True, False],
+            size=shape,
+            p=[p, 1 - p]
+        )
+
 
 class SimModel(AbstractSimModel):
     """
@@ -141,6 +154,5 @@ class SimModel(AbstractSimModel):
 
                 if not self.nodes.I.any():
                     # if no nodes are infected anymore, stop the simulation
-                    # changed printf command per debugger output - WMT
-                    printf('No more infected nodes, simulation stopped on day {day}.')
+                    print(f'No more infected nodes, simulation stopped on day {day}.')
                     break
