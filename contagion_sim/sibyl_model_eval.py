@@ -8,11 +8,10 @@ file, You can obtain one at https://mozilla.org/MPL/2.0/.
 author: Fabio Mazza
 """
 import numpy as np
-import pandas as pd
 import numba as nb
 from multisim_model_evaluation import MultisimModelEvaluation
 
-@nb.njit(nb.bool_[:, :] (nb.int_[:], nb.bool_[:, :], nb.bool_[:, :]))
+@nb.njit(nb.bool_[:, :](nb.int_[:], nb.bool_[:, :], nb.bool_[:, :]))
 def mark_new_inf(dest, S_mat, spread_I):
      ## Run over the edges
         
