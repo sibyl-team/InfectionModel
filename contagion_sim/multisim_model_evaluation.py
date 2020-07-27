@@ -79,7 +79,7 @@ class MultisimModelEvaluation(AbstractSimModel):
 
         # new positives per simulation
         new_I = np.full((self.n_nodes, self.n_sims), False)
-        new_I[new_positive] = True
+        new_I[new_positive.a] = True
         new_I = new_I & ~self.I
         self.I[new_I] = True
 
@@ -93,7 +93,7 @@ class MultisimModelEvaluation(AbstractSimModel):
 
         # remove infection from negative nodes
         new_S = np.full((self.n_nodes, self.n_sims), False)
-        new_S[new_negative] = True
+        new_S[new_negative.a] = True
         self.I = self.I & ~new_S
         self.R_t[new_S] = np.inf
 
