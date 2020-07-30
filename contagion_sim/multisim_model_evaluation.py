@@ -91,7 +91,8 @@ class MultisimModelEvaluation(AbstractSimModel):
         # Negatives
 
         if self.strong_negative:
-            new_negative = self.observations[self.observations.state == 0]
+            previous_observations = self.observations[self.observations.t <= self.today]
+            new_negative = previous_observations[previous_observations == 0]
         else:
             new_negative = daily_observations[daily_observations.state == 0]
 
