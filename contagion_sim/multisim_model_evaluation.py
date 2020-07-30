@@ -11,7 +11,7 @@ class MultisimModelEvaluation(AbstractSimModel):
 
     def __init__(self, n_nodes, n_days, n_sims, edge_batch_gen, observations,
                  infection_p, infected_p, recovery_t, recovery_w, recovery_dist='geometric',
-                 directed_edges=False,
+                 directed_edges=False, strong_negative=False,
                  plt_ax=None, tqdm=None):
         """
         :param n_nodes: total number of nodes. Node IDs must go from 0 to n_nodes-1.
@@ -31,6 +31,7 @@ class MultisimModelEvaluation(AbstractSimModel):
         self.recovery_w = recovery_w
         self.recovery_dist = recovery_dist
         self.directed_edges = directed_edges
+        self.strong_negative = strong_negative
         self.n_sims = n_sims
         self.today = 0
 
@@ -87,7 +88,11 @@ class MultisimModelEvaluation(AbstractSimModel):
         #
         # Negatives
 
-        new_negative = daily_observations[daily_observations.state == 0]
+        if self.strong_negative:
+            previous_observations = self.observations[self.observations.t <= self.today]
+            new_negative = previous_observations[previous_observations == 0]
+        else:
+            new_negative = daily_observations[daily_observations.state == 0]
 
         # remove infection from negative nodes
         new_S = np.full((self.n_nodes, self.n_sims), False)
