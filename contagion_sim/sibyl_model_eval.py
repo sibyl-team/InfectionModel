@@ -32,12 +32,13 @@ class FasterEvaluationModel(MultisimModelEvaluation):
     def __init__(self, n_nodes, n_days, n_sims, edge_batch_gen, observations,
                  infection_p, infected_p, recovery_t, recovery_w=None, tau_backprop_I=0,
                  recovery_dist="geometric", directed_edges=False, strong_negative=True,
-                 plt_ax=None, tqdm=None):
+                 plt_ax=None, tqdm=None, debug=False):
         super().__init__(n_nodes, n_days, n_sims, edge_batch_gen, observations,
                          infection_p, infected_p, recovery_t, recovery_w, recovery_dist,
                          directed_edges, strong_negative, plt_ax, tqdm)
 
         self.tau_backprop_I = tau_backprop_I
+        self.debug = debug
 
     def get_daily_positive_obs(self, daily_obs):
         """
@@ -46,7 +47,8 @@ class FasterEvaluationModel(MultisimModelEvaluation):
         """
         obs = self.observations
         if self.tau_backprop_I > 0:
-            print(f"Applying tests from {self.today + self.tau_backprop_I} to {self.today}")
+            if self.debug:
+                print(f"Applying tests from {self.today + self.tau_backprop_I} to {self.today}")
             
             sel_mask = (obs.t >= self.today) & (obs.t <= self.today + self.tau_backprop_I) & (obs.state == 1)
             return obs[sel_mask]
