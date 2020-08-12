@@ -31,7 +31,7 @@ class FasterEvaluationModel(MultisimModelEvaluation):
 
     def __init__(self, n_nodes, n_days, n_sims, edge_batch_gen, observations,
                  infection_p, infected_p, recovery_t, recovery_w=None, tau_backprop_I=0,
-                 recovery_dist="geometric", directed_edges=False, strong_negative=False,
+                 recovery_dist="geometric", directed_edges=False, strong_negative=True,
                  plt_ax=None, tqdm=None):
         super().__init__(n_nodes, n_days, n_sims, edge_batch_gen, observations,
                          infection_p, infected_p, recovery_t, recovery_w, recovery_dist,

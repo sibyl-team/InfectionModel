@@ -16,7 +16,7 @@ class ContinuousMultisimModel(AbstractSimModel):
                  infection_p, recovery_t, recovery_w, n_days, n_sims,
                  daily_tests_positive, daily_tests_random,
                  performance_true_I, strong_negative=False,
-                 plt_ax=None, tqdm=None,debug=False):
+                 plt_ax=None, tqdm=None, debug=False):
         """
         :param n_nodes: total number of nodes. Node IDs must go from 0 to n_nodes-1.
         :param edge_batch_gen: generator yielding daily edge pd.DataFrames with
