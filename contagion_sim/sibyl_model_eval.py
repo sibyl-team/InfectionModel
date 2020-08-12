@@ -24,7 +24,35 @@ def mark_new_inf(dest, S_mat, spread_I):
 class FasterEvaluationModel(MultisimModelEvaluation):
     """
     Faster version of MultisimModelEvaluation
+    with a few quirks:
+        tau_backprop_I is the number of days the positive tests (Infected)
+                        have to be reapplied backwards in time
     """
+
+    def __init__(self, n_nodes, n_days, n_sims, edge_batch_gen, observations,
+                 infection_p, infected_p, recovery_t, recovery_w=None, tau_backprop_I=0,
+                 recovery_dist="geometric", directed_edges=False, strong_negative=False,
+                 plt_ax=None, tqdm=None):
+        super().__init__(n_nodes, n_days, n_sims, edge_batch_gen, observations,
+                         infection_p, infected_p, recovery_t, recovery_w, recovery_dist,
+                         directed_edges, strong_negative, plt_ax, tqdm)
+
+        self.tau_backprop_I = tau_backprop_I
+
+    def get_daily_positive_obs(self, daily_obs):
+        """
+        Extract the correct observations for the positives, for today
+        Daily obs provided to avoid re-extraction
+        """
+        obs = self.observations
+        if self.tau_backprop_I > 0:
+            print(f"Applying tests from {self.today + self.tau_backprop_I} to {self.today}")
+            
+            sel_mask = (obs.t >= self.today) & (obs.t <= self.today + self.tau_backprop_I) & (obs.state == 1)
+            return obs[sel_mask]
+        else:
+            return daily_obs[daily_obs.state == 1]
+    
     
     def _update_state(self, edges, spread_I):
         #new_inf = np.zeros_like(self.I)

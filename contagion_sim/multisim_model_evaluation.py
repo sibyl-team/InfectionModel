@@ -65,6 +65,13 @@ class MultisimModelEvaluation(AbstractSimModel):
             return np.random.normal(self.recovery_t, self.recovery_w, size) + self.today
         else:
             raise Exception(f'Recovery dist "{self.recovery_dist}" is not supported.')
+    
+    def get_daily_positive_obs(self, daily_obs):
+        """
+        Extract the correct observations for the positives, for today
+        Daily obs provided to avoid re-extraction
+        """
+        return daily_obs[daily_obs.state == 1]
 
 
     def apply_testing(self):
@@ -74,7 +81,7 @@ class MultisimModelEvaluation(AbstractSimModel):
         #
         # Positives
 
-        new_positive = daily_observations[daily_observations.state == 1]
+        new_positive = self.get_daily_positive_obs(daily_observations)
 
         # new positives per simulation
         new_I = np.full((self.n_nodes, self.n_sims), False)
