@@ -12,7 +12,7 @@ class MultisimModelEvaluation(AbstractSimModel):
     def __init__(self, n_nodes, n_days, n_sims, edge_batch_gen, observations,
                  infection_p, infected_p, recovery_t, recovery_w, recovery_dist='geometric',
                  directed_edges=False, strong_negative=False,
-                 plt_ax=None, tqdm=None):
+                 plt_ax=None, tqdm=None, debug=False):
         """
         :param n_nodes: total number of nodes. Node IDs must go from 0 to n_nodes-1.
         :param edge_batch_gen: generator yielding daily edge pd.DataFrames with
@@ -34,6 +34,7 @@ class MultisimModelEvaluation(AbstractSimModel):
         self.strong_negative = strong_negative
         self.n_sims = n_sims
         self.today = 0
+        self.debug = debug
 
         # Model keeps track of S and I states as binary matrices, with R
         # being implicitly defined as ~S & ~I. Additionally, time of recovery
@@ -96,7 +97,7 @@ class MultisimModelEvaluation(AbstractSimModel):
         # Negatives
 
         if self.strong_negative:
-            previous_observations = self.observations[self.observations.t <= self.today]
+            previous_observations = self.observations[self.observations.t >= self.today]
             new_negative = previous_observations[previous_observations.state == 0]
         else:
             new_negative = daily_observations[daily_observations.state == 0]
@@ -106,6 +107,9 @@ class MultisimModelEvaluation(AbstractSimModel):
         new_S[new_negative.a.values] = True
         self.I = self.I & ~new_S
         self.R_t[new_S] = np.inf
+        if self.debug:
+            print(f"tests - I: {len(new_positive.a.values)}, S: {len(new_negative.a.values)}")
+            print(new_positive.a.values, new_negative.a.values)
 
     def _update_state(self, edges, spread_I):
 

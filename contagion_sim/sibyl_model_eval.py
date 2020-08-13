@@ -35,10 +35,9 @@ class FasterEvaluationModel(MultisimModelEvaluation):
                  plt_ax=None, tqdm=None, debug=False):
         super().__init__(n_nodes, n_days, n_sims, edge_batch_gen, observations,
                          infection_p, infected_p, recovery_t, recovery_w, recovery_dist,
-                         directed_edges, strong_negative, plt_ax, tqdm)
+                         directed_edges, strong_negative, plt_ax, tqdm, debug)
 
         self.tau_backprop_I = tau_backprop_I
-        self.debug = debug
 
     def get_daily_positive_obs(self, daily_obs):
         """
