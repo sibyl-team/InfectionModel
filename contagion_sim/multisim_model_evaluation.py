@@ -83,7 +83,7 @@ class MultisimModelEvaluation(AbstractSimModel):
         # Positives
 
         new_positive = self.get_daily_positive_obs(daily_observations)
-
+        n_pos = len(new_positive)
         # new positives per simulation
         new_I = np.full((self.n_nodes, self.n_sims), False)
         new_I[new_positive.a.values] = True
@@ -101,15 +101,17 @@ class MultisimModelEvaluation(AbstractSimModel):
             new_negative = previous_observations[previous_observations.state == 0]
         else:
             new_negative = daily_observations[daily_observations.state == 0]
-
+        n_neg =  len(new_negative)
         # remove infection from negative nodes
         new_S = np.full((self.n_nodes, self.n_sims), False)
         new_S[new_negative.a.values] = True
         self.I = self.I & ~new_S
         self.R_t[new_S] = np.inf
         if self.debug:
-            print(f"tests - I: {len(new_positive.a.values)}, S: {len(new_negative.a.values)}")
+            print(f"tests - I: {n_pos}, S: {n_neg}")
             print(new_positive.a.values, new_negative.a.values)
+        self.pbar.set_description(f"tests: I {n_pos}, S {n_neg}")
+        
 
     def _update_state(self, edges, spread_I):
 
